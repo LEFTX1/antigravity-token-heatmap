@@ -130,6 +130,26 @@ After installation, reload MCP servers (or restart Antigravity) and simply ask:
 
 `google-antigravity` · `antigravity-plugin` · `antigravity-cli` · `antigravity-skills` · `gemini-cli` · `gemini-cli-extension` · `mcp` · `mcp-app` · `mcp-server` · `token-usage` · `token-heatmap` · `ai-coding-analytics` · `finops` · `ccusage` · `developer-wrapped`
 
+## Sponsor · 赞赏支持
+
+If this plugin makes your AI coding stats more insightful or enjoyable, feel free to buy the author a coffee!  
+如果这个插件帮到了你，欢迎请作者喝杯咖啡，感谢支持开源持续迭代 ☕
+
+<table>
+  <tr>
+    <td align="center">
+      <img src="docs/sponsor-wechat.png" width="220" alt="微信赞赏码 WeChat Pay" /><br/>
+      <b>微信支付 · WeChat Pay</b>
+    </td>
+    <td align="center">
+      <img src="docs/sponsor-alipay.jpg" width="220" alt="支付宝收款码 Alipay" /><br/>
+      <b>支付宝 · Alipay</b>
+    </td>
+  </tr>
+</table>
+
+---
+
 ## License
 
 [MIT License](LICENSE) © 2026 [LEFTX1](https://github.com/LEFTX1)
