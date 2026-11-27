@@ -187,11 +187,12 @@ FILE_TOOLS = READ_TOOLS | WRITE_TOOLS
 KNOWN_BINS = {
     "python", "powershell", "pwsh", "node", "npm", "npx", "git", "curl", "rg",
     "ffprobe", "ffmpeg", "dotnet", "cargo", "go", "pip", "uv", "esbuild",
-    "playwright", "adb", "sqlite3", "gh", "docker", "baw", "grep", "ls", "dir",
+    "playwright", "adb", "sqlite3", "gh", "docker", "baw", "grep",
 }
+SKIP_SHELL_NOISE = {"cd", "set-location", "pushd", "popd", "ls", "dir", "pwd", "echo", "write-host", "clear", "cls"}
 PS_CMDLETS = {
-    "get-childitem", "get-content", "select-string", "get-process",
-    "set-location", "write-host", "remove-item", "copy-item", "new-item",
+    "get-childitem", "get-content", "get-item", "set-item", "select-string", "get-process",
+    "write-host", "remove-item", "copy-item", "new-item",
     "move-item", "test-path", "invoke-webrequest", "invoke-restmethod",
     "powershell", "pwsh",
 }
@@ -256,6 +257,8 @@ def _normalize_cmd_bin(cmd_line: str) -> str:
         return "powershell"
     if base in ("python3", "py") or base.startswith("python3."):
         return "python"
+    if base in SKIP_SHELL_NOISE:
+        return ""
     if base in KNOWN_BINS or re.match(r"^[a-z0-9][a-z0-9._-]{1,18}$", base):
         return base
     return ""
@@ -274,19 +277,57 @@ def _classify_error_kind(err_val) -> str:
     return "other"
 
 
+GENERIC_DIRS = {"src", "source", "app", "lib", "dist", "build", "static", "scripts", "ui", "monitor", "web", "utils", "client", "server"}
+
+
+def _short_project_file(fwd_path: str):
+    """Return (folder_ctx, basename, is_scratch, project_root) from a forward-slash file path."""
+    parts = [x for x in fwd_path.split("/") if x]
+    bn = parts[-1] if parts else ""
+    low = fwd_path.lower()
+    is_scratch = "/.gemini/antigravity/brain/" in low
+
+    folder_ctx = ""
+    if len(parts) >= 2:
+        parent = parts[-2]
+        if parent.lower() in GENERIC_DIRS and len(parts) >= 3 and parts[-3].lower() not in ("administrator", "users", "c:", "d:", "e:"):
+            folder_ctx = parts[-3]
+        elif parent.lower() not in ("administrator", "users", "c:", "d:", "e:"):
+            folder_ctx = parent
+
+    proj_root = ""
+    if not is_scratch:
+        if "/plugins/" in low:
+            idx = low.split("/plugins/", 1)[1].split("/")[0]
+            if idx:
+                proj_root = idx
+        elif "/scratch/" in low:
+            idx = low.split("/scratch/", 1)[1].split("/")[0]
+            if idx and "." not in idx:
+                proj_root = idx
+        else:
+            skip = {"users", "administrator", "documents", "desktop", "downloads", "outputs", "files-pasted-by-the-user-agent", "source", "src", "app", "web", "client", "server"}
+            clean_parts = [p for p in parts[:-1] if ":" not in p and not p.startswith(".") and p.lower() not in skip]
+            if clean_parts:
+                proj_root = clean_parts[0]
+    return folder_ctx, bn, is_scratch, proj_root
+
+
 def _extract_file_info(tc_args):
     if not isinstance(tc_args, dict):
-        return "", "", ""
+        return "", "", "", False, ""
     raw_p = tc_args.get("Path") or tc_args.get("TargetFile") or tc_args.get("AbsolutePath") or tc_args.get("path") or ""
     p = str(raw_p).strip().strip('"').strip("'").strip()
     if not p:
-        return "", "", ""
-    low = p.lower().replace("/", "\\")
-    if "\\browser_sandbox\\" in low or "\\.system_generated\\" in low or "\\appdata\\local\\temp\\" in low:
-        return "", "", ""
+        return "", "", "", False, ""
+    # Collapse literal double-escaped backslashes from historical transcript args
+    fwd = re.sub(r"[\\/]+", "/", p).strip()
+    low = fwd.lower()
+    if "/browser_sandbox/" in low or "/.system_generated/" in low or "/appdata/local/temp/" in low:
+        return "", "", "", False, ""
     _, ext = os.path.splitext(low)
-    bn = os.path.basename(p.replace("\\", "/").rstrip("/"))
-    return low, (ext if 1 < len(ext) <= 8 else ""), bn
+    folder_ctx, bn, is_scratch, proj_root = _short_project_file(fwd)
+    return low, (ext if 1 < len(ext) <= 8 else ""), bn, is_scratch, folder_ctx or proj_root
 
 
 def _parse_line_dt(d, mtime_float):
@@ -391,16 +432,16 @@ def _parse_transcript_for_heatmap(path: str):
                                 tools[nm] = tools.get(nm, 0) + 1
                                 tc_args = tc.get("args")
                                 if nm in FILE_TOOLS:
-                                    fpath, ext, bn = _extract_file_info(tc_args)
+                                    fpath, ext, bn, is_scratch, folder_ctx = _extract_file_info(tc_args)
                                     if fpath:
                                         unique_files.add(fpath)
                                     if ext:
                                         file_exts[ext] = file_exts.get(ext, 0) + 1
-                                    if bn:
-                                        frw = file_rw.get(bn)
+                                    if fpath and bn and not is_scratch:
+                                        frw = file_rw.get(fpath)
                                         if not frw:
-                                            frw = [0, 0, ext, fpath]
-                                            file_rw[bn] = frw
+                                            frw = [0, 0, ext, bn, folder_ctx, fpath]
+                                            file_rw[fpath] = frw
                                         if nm in READ_TOOLS:
                                             frw[0] += 1
                                         else:
@@ -510,7 +551,7 @@ def _parse_transcript_for_heatmap(path: str):
 
     day_keys = sorted(daily.keys())
     return {
-        "v6": 2,
+        "v6": 4,
         "mtime": st.st_mtime,
         "size": st.st_size,
         "daily": daily,
@@ -953,7 +994,7 @@ def collect_heatmap_data(data_dir=None):
 
     for cid, fp, st in uniq_stat:
         cached = disk_cache.get(fp)
-        if cached and cached.get("mtime") == st.st_mtime and cached.get("size") == st.st_size and cached.get("v6") == 2:
+        if cached and cached.get("mtime") == st.st_mtime and cached.get("size") == st.st_size and cached.get("v6") == 4:
             parsed = cached
         else:
             parsed = _parse_transcript_for_heatmap(fp)
@@ -1019,10 +1060,10 @@ def collect_heatmap_data(data_dir=None):
         for ext_k, ext_cnt in (parsed.get("file_exts") or {}).items():
             ext_agg[ext_k] = ext_agg.get(ext_k, 0) + int(ext_cnt)
 
-        for bn, frw in (parsed.get("file_rw") or {}).items():
-            cur_f = file_rw_agg.get(bn)
+        for fpath_k, frw in (parsed.get("file_rw") or {}).items():
+            cur_f = file_rw_agg.get(fpath_k)
             if not cur_f:
-                file_rw_agg[bn] = [int(frw[0]), int(frw[1]), frw[2], frw[3]]
+                file_rw_agg[fpath_k] = [int(frw[0]), int(frw[1]), frw[2], frw[3], frw[4], frw[5] if len(frw) > 5 else fpath_k]
             else:
                 cur_f[0] += int(frw[0])
                 cur_f[1] += int(frw[1])
@@ -1104,6 +1145,17 @@ def collect_heatmap_data(data_dir=None):
 
         if not is_child and conv_fresh > 0:
             top_cm = max(conv_model_fresh.items(), key=lambda kv: kv[1])[0] if conv_model_fresh else "orchestrator-neon"
+            # Infer meaningful project folder when workspace metadata is missing ("默认工作区")
+            eff_ws = ws_name
+            if not eff_ws:
+                p_cnts = {}
+                for _fk, _frw in (parsed.get("file_rw") or {}).items():
+                    _pdir = _frw[4] if len(_frw) > 4 else ""
+                    if _pdir:
+                        p_cnts[_pdir] = p_cnts.get(_pdir, 0) + int(_frw[0]) + int(_frw[1])
+                if p_cnts:
+                    eff_ws = max(p_cnts.items(), key=lambda kv: kv[1])[0]
+            ws_key = eff_ws or "临时会话"
             c_calls = int(parsed.get("conv_calls") or 0)
             c_ckpts = int(parsed.get("checkpoints") or 0)
             c_errs = int(parsed.get("error_events") or 0)
@@ -1118,7 +1170,7 @@ def collect_heatmap_data(data_dir=None):
                 {
                     "id": cid,
                     "title": conv_title,
-                    "workspace": ws_name or "默认工作区",
+                    "workspace": ws_key,
                     "calls": c_calls,
                     "fresh": conv_fresh,
                     "output": conv_out,
@@ -1138,7 +1190,7 @@ def collect_heatmap_data(data_dir=None):
             conv_detail_raw[cid] = {
                 "id": cid,
                 "title": conv_title,
-                "workspace": ws_name or "默认工作区",
+                "workspace": ws_key,
                 "firstDate": parsed.get("first_day") or "",
                 "lastDate": parsed.get("last_day") or "",
                 "calls": c_calls,
@@ -1172,15 +1224,21 @@ def collect_heatmap_data(data_dir=None):
                     for mid, mfr in sorted(conv_model_fresh.items(), key=lambda kv: -kv[1])[:5]
                 ],
                 "topTools": [
-                    {
-                        "name": tn,
-                        "label": TOOL_LABELS.get(tn, tn),
-                        "count": int(tc),
-                    }
-                    for tn, tc in sorted(c_tools.items(), key=lambda kv: -int(kv[1]))[:6]
+                    {"name": k, "label": lbl, "count": cnt}
+                    for k, (lbl, cnt) in sorted(
+                        {
+                            "cmd": ("终端命令执行", int(c_tools.get("run_command", 0))),
+                            "write": ("代码编写改写", sum(int(c_tools.get(k, 0)) for k in WRITE_TOOLS)),
+                            "read": ("源码阅读检视", sum(int(c_tools.get(k, 0)) for k in READ_TOOLS)),
+                            "scout": ("联网与浏览器", int(c_tools.get("search_web", 0)) + int(c_tools.get("read_url_content", 0)) + int(c_tools.get("webview_browser", 0)) + sum(int(v) for k, v in c_tools.items() if str(k).startswith("browser_"))),
+                            "multi": ("多代理与调度", int(c_tools.get("invoke_subagent", 0)) + int(c_tools.get("send_message", 0)) + int(c_tools.get("run_workflow", 0)) + int(c_tools.get("schedule", 0))),
+                            "mcp": ("MCP 外部插件", int(c_tools.get("call_mcp_tool", 0)) + int(c_tools.get("list_resources", 0)) + int(c_tools.get("read_resource", 0))),
+                        }.items(),
+                        key=lambda kv: -kv[1][1],
+                    )
+                    if cnt > 0
                 ],
             }
-            ws_key = ws_name or "默认工作区"
             wrow = workspaces_agg.get(ws_key)
             if not wrow:
                 wrow = {"name": ws_key, "convs": 0, "calls": 0, "fresh": 0, "output": 0}
@@ -1662,7 +1720,24 @@ def collect_heatmap_data(data_dir=None):
         "prev7ActiveDays": p7_days,
     }
 
-    # Tool Breakdown, MCP Ecosystem, Shell Stack & Hot Files
+    # Semantic Action Breakdown (merges read+view / edit+write, excludes internal UI plumbing like update_focus/manage_task)
+    action_specs = [
+        ("cmd", "终端命令行执行", "编译、测试、脚本与系统自动化执行", "#38bdf8", int(tools_agg.get("run_command", 0))),
+        ("write", "源码编写与重构", "新建源码文档、精准局部改写与批量编辑", "#3de066", sum(int(tools_agg.get(k, 0)) for k in WRITE_TOOLS)),
+        ("read", "源码阅读与检视", "代码文件读取、大纲扫描与上下文检视", "#2dd4bf", sum(int(tools_agg.get(k, 0)) for k in READ_TOOLS)),
+        ("scout", "联网检索与浏览器实操", "实时网页搜索、文档读取与内置浏览器操控", "#818cf8", web_cnt + browser_cnt),
+        ("multi", "多代理协作与定时调度", "派发子代理并发、跨代理通信与工作流编排", "#f472b6", agent_msgs + int(tools_agg.get("schedule", 0))),
+        ("mcp", "MCP 外部插件生态", "调用外部 MCP Server 工具与资源扩展", "#c084fc", mcp_calls),
+        ("media", "AI 图像生成创作", "驱动图像生成与编辑创作工具", "#fbbf24", img_gen_cnt),
+    ]
+    action_tot = max(1, sum(x[4] for x in action_specs))
+    action_breakdown_out = [
+        {"key": k, "label": lbl, "desc": desc, "color": col, "count": cnt, "pct": round((cnt / action_tot) * 100, 1)}
+        for k, lbl, desc, col, cnt in sorted(action_specs, key=lambda r: -r[4])
+        if cnt > 0
+    ]
+
+    # Tool Breakdown, MCP Ecosystem, Shell Stack & Path-Deduplicated Hot Files
     tot_t_safe = max(1, total_tool_calls)
     tool_breakdown_out = [
         {
@@ -1696,19 +1771,26 @@ def collect_heatmap_data(data_dir=None):
     ]
 
     hot_files_out = []
-    for bn, frw in sorted(file_rw_agg.items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:10]:
-        r_c, w_c, ext_v, s_path = frw
+    for fpath_k, frw in sorted(file_rw_agg.items(), key=lambda kv: -(kv[1][0] + kv[1][1]))[:12]:
+        r_c, w_c, ext_v, bn, folder_ctx, sample_p = frw
         lname, lcol = EXT_LANG_MAP.get(ext_v, (ext_v.lstrip(".").upper() or "File", "#64748b"))
         hot_files_out.append({
             "name": bn,
+            "folder": folder_ctx,
             "ext": ext_v,
             "lang": lname,
             "color": lcol,
             "reads": r_c,
             "writes": w_c,
             "total": r_c + w_c,
-            "samplePath": s_path,
+            "samplePath": sample_p,
         })
+
+    tot_proj_fresh = max(1, sum(w["fresh"] for w in workspaces_agg.values()))
+    projects_out = [
+        {**w, "pct": round((w["fresh"] / tot_proj_fresh) * 100, 1)}
+        for w in sorted(workspaces_agg.values(), key=lambda x: -x["fresh"])[:8]
+    ]
 
     # Data-Backed Automated Insights (4 Diagnostic Cards)
     fd = momentum_out["freshDeltaPct"]
@@ -1863,9 +1945,11 @@ def collect_heatmap_data(data_dir=None):
         "contextHealth": context_health_out,
         "momentum": momentum_out,
         "toolBreakdown": tool_breakdown_out,
+        "actionBreakdown": action_breakdown_out,
         "mcpEcosystem": mcp_eco_out,
         "shellStack": shell_stack_out,
         "hotFiles": hot_files_out,
+        "projects": projects_out,
         "insights": insights_out,
         "convDetails": conv_details_out,
     }
