@@ -187,15 +187,19 @@ FILE_TOOLS = READ_TOOLS | WRITE_TOOLS
 KNOWN_BINS = {
     "python", "powershell", "pwsh", "node", "npm", "npx", "git", "curl", "rg",
     "ffprobe", "ffmpeg", "dotnet", "cargo", "go", "pip", "uv", "esbuild",
-    "playwright", "adb", "sqlite3", "gh", "docker", "baw", "grep",
+    "playwright", "adb", "sqlite3", "gh", "docker", "baw", "grep", "csc", "codex", "pytest",
 }
-SKIP_SHELL_NOISE = {"cd", "set-location", "pushd", "popd", "ls", "dir", "pwd", "echo", "write-host", "clear", "cls"}
-PS_CMDLETS = {
-    "get-childitem", "get-content", "get-item", "set-item", "select-string", "get-process",
-    "write-host", "remove-item", "copy-item", "new-item",
-    "move-item", "test-path", "invoke-webrequest", "invoke-restmethod",
-    "powershell", "pwsh",
+SKIP_SHELL_NOISE = {
+    "cd", "set-location", "pushd", "popd", "ls", "dir", "pwd", "echo",
+    "write-host", "write-output", "clear", "cls", "start-sleep", "foreach", "function",
 }
+PS_CMDLET_PREFIXES = (
+    "get-", "set-", "new-", "remove-", "add-", "clear-", "copy-", "move-",
+    "rename-", "start-", "stop-", "restart-", "test-", "invoke-", "select-",
+    "where-", "foreach-", "sort-", "group-", "measure-", "format-", "out-",
+    "write-", "read-", "import-", "export-", "convert-", "compare-", "join-",
+    "split-", "push-", "pop-", "enter-", "exit-", "resolve-", "wait-", "enable-", "disable-",
+)
 
 MODEL_PRICING_PER_M = {
     "claude-opus-5-5": (15.0, 1.50, 75.0),
@@ -222,38 +226,45 @@ def _normalize_cmd_bin(cmd_line: str) -> str:
     s = str(cmd_line or "").strip()
     if not s:
         return ""
+    # Unescape leading literal \n/\r/\t sequences inside raw PowerShell multi-line command strings
+    s = re.sub(r'^["\'\s]*(?:\\+[ntr])+', "", s).strip()
     low = s.lower()
     if "@'" in s and ("| python" in low or "python.exe" in low):
         return "python"
-    if re.match(r"^(?:\\n|\s)*(?:import|from)\s+[a-z_]", low) or "nimport" in low[:24] or low.startswith("@\""):
-        if "import " in low or "python" in low:
+    if re.match(r"^(?:import|from|with\s+open)\s+[a-z_\"']", low) or "import " in low[:40]:
+        if "python" in low or "import " in low[:40]:
             return "python"
     # Strip common PowerShell preamble statements to uncover primary runtime binary
     parts = [p.strip() for p in s.split(";") if p.strip()]
     chosen = parts[0] if parts else s
     for p in parts:
-        pl = p.lower()
+        pl = re.sub(r'^["\'\s]*(?:\\+[ntr])+', "", p.lower()).strip()
         if (
             pl.startswith("$erroractionpreference")
             or pl.startswith("[console]::")
             or pl.startswith("chcp")
-            or re.match(r"^(?:cd|set-location|pushd)\b", pl)
+            or re.match(r"^(?:cd|set-location|pushd|push-location)\b", pl)
             or re.match(r"^\$env:", pl)
         ):
             continue
         chosen = p
         break
+    chosen = re.sub(r'^["\'\s]*(?:\\+[ntr])+', "", chosen).strip()
     first_tok = chosen.split()[0].strip("\"'&|()").lower() if chosen.split() else ""
     if not first_tok or first_tok.startswith("$") or first_tok in ("@", "@'", "{", "}", "#", "&"):
         if "python" in low:
             return "python"
-        if "node " in low or "node.exe" in low:
+        if "node" in low or first_tok in ("const", "let", "async"):
             return "node"
         return ""
+    if first_tok in ("const", "let", "await", "import") and ("require(" in low or "playwright" in low or "node" in low or "fs." in low):
+        return "node"
     base = os.path.basename(first_tok.replace("\\", "/"))
-    if base.endswith(".exe"):
-        base = base[:-4]
-    if base in PS_CMDLETS:
+    for ext in (".exe", ".cmd", ".bat"):
+        if base.endswith(ext):
+            base = base[: -len(ext)]
+            break
+    if base.startswith(PS_CMDLET_PREFIXES) or base in ("powershell", "pwsh", "foreach", "function"):
         return "powershell"
     if base in ("python3", "py") or base.startswith("python3."):
         return "python"
@@ -267,49 +278,70 @@ def _normalize_cmd_bin(cmd_line: str) -> str:
 def _classify_error_kind(err_val) -> str:
     s = str(err_val or "").lower()
     if not s:
-        return "other"
-    if any(k in s for k in ("api error", "stream", "eof", "timeout", "request failed", "interrupted", "network", "status 5", "status 429")):
+        return "state_arg"
+    if any(k in s for k in ("api error", "stream", "eof", "timeout", "request failed", "interrupted", "network", "status 5", "status 429", "no summary returned", "fetch document")):
         return "api_net"
     if any(k in s for k in ("target content", "not found in the file", "target not found", "replace")):
         return "edit_match"
     if any(k in s for k in ("file does not exist", "cannot find path", "no such file", "enoent")):
         return "file_missing"
-    return "other"
+    return "state_arg"
 
 
-GENERIC_DIRS = {"src", "source", "app", "lib", "dist", "build", "static", "scripts", "ui", "monitor", "web", "utils", "client", "server"}
+GENERIC_DIRS = {
+    "src", "source", "app", "lib", "dist", "build", "static", "scripts", "ui",
+    "monitor", "web", "utils", "client", "server", "core", "verify", "obs_hud",
+    "assets", "docs", "skills", "rules", "hooks",
+}
+CONTAINER_SKIP_DIRS = {
+    "users", "administrator", "documents", "desktop", "downloads", "outputs",
+    "files-pasted-by-the-user-agent", "codex", "scratch", "plugins", "antigravity",
+    "antigravity-ide", "antigravity-cli", ".gemini", ".system_generated", "config",
+}
 
 
 def _short_project_file(fwd_path: str):
-    """Return (folder_ctx, basename, is_scratch, project_root) from a forward-slash file path."""
+    """Return (display_folder, basename, is_scratch, proj_root) preserving case."""
     parts = [x for x in fwd_path.split("/") if x]
     bn = parts[-1] if parts else ""
     low = fwd_path.lower()
     is_scratch = "/.gemini/antigravity/brain/" in low
 
-    folder_ctx = ""
-    if len(parts) >= 2:
-        parent = parts[-2]
-        if parent.lower() in GENERIC_DIRS and len(parts) >= 3 and parts[-3].lower() not in ("administrator", "users", "c:", "d:", "e:"):
-            folder_ctx = parts[-3]
-        elif parent.lower() not in ("administrator", "users", "c:", "d:", "e:"):
-            folder_ctx = parent
-
     proj_root = ""
     if not is_scratch:
         if "/plugins/" in low:
-            idx = low.split("/plugins/", 1)[1].split("/")[0]
-            if idx:
-                proj_root = idx
+            idx_pos = low.index("/plugins/") + len("/plugins/")
+            seg = fwd_path[idx_pos:].split("/")[0]
+            if seg:
+                proj_root = seg
         elif "/scratch/" in low:
-            idx = low.split("/scratch/", 1)[1].split("/")[0]
-            if idx and "." not in idx:
-                proj_root = idx
+            idx_pos = low.index("/scratch/") + len("/scratch/")
+            seg = fwd_path[idx_pos:].split("/")[0]
+            if seg and "." not in seg:
+                proj_root = seg
         else:
-            skip = {"users", "administrator", "documents", "desktop", "downloads", "outputs", "files-pasted-by-the-user-agent", "source", "src", "app", "web", "client", "server"}
-            clean_parts = [p for p in parts[:-1] if ":" not in p and not p.startswith(".") and p.lower() not in skip]
+            clean_parts = [
+                p for p in parts[:-1]
+                if ":" not in p
+                and not p.startswith(".")
+                and p.lower() not in CONTAINER_SKIP_DIRS
+                and p.lower() not in GENERIC_DIRS
+                and not re.match(r"^\d{4}-\d{2}-\d{2}$", p)
+            ]
             if clean_parts:
                 proj_root = clean_parts[0]
+
+    folder_ctx = proj_root
+    if not folder_ctx and len(parts) >= 2:
+        for p in reversed(parts[:-1]):
+            pl = p.lower()
+            if ":" in p or pl in ("administrator", "users"):
+                continue
+            if pl not in GENERIC_DIRS:
+                folder_ctx = p
+                break
+        if not folder_ctx:
+            folder_ctx = parts[-2]
     return folder_ctx, bn, is_scratch, proj_root
 
 
@@ -320,14 +352,29 @@ def _extract_file_info(tc_args):
     p = str(raw_p).strip().strip('"').strip("'").strip()
     if not p:
         return "", "", "", False, ""
-    # Collapse literal double-escaped backslashes from historical transcript args
     fwd = re.sub(r"[\\/]+", "/", p).strip()
     low = fwd.lower()
     if "/browser_sandbox/" in low or "/.system_generated/" in low or "/appdata/local/temp/" in low:
         return "", "", "", False, ""
     _, ext = os.path.splitext(low)
     folder_ctx, bn, is_scratch, proj_root = _short_project_file(fwd)
-    return low, (ext if 1 < len(ext) <= 8 else ""), bn, is_scratch, folder_ctx or proj_root
+    return low, (ext if 1 < len(ext) <= 8 else ""), bn, is_scratch, proj_root or folder_ctx
+
+
+def _clean_user_prompt_snippet(raw_txt: str) -> str:
+    txt = str(raw_txt or "").strip()
+    if not txt:
+        return ""
+    m = re.search(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", txt, flags=re.S)
+    if m:
+        txt = m.group(1).strip()
+    txt = re.sub(r"<ADDITIONAL_METADATA>.*?</ADDITIONAL_METADATA>", "", txt, flags=re.S)
+    txt = re.sub(r"\[Attachment:[^\]]*\]", "", txt).strip()
+    txt = re.sub(r"\s+", " ", txt).strip()
+    low = txt.lower()
+    if not txt or low in ("new", "hi", "hello", "test", "继续", "1", "ok") or len(txt) <= 2:
+        return ""
+    return txt[:42].rstrip() + ("…" if len(txt) > 42 else "")
 
 
 def _parse_line_dt(d, mtime_float):
@@ -361,11 +408,12 @@ def _parse_transcript_for_heatmap(path: str):
     file_exts = {}   # ext -> count
     file_rw = {}     # basename -> [reads, writes, ext, sample_path]
     unique_files = set()
-    error_cats = {"api_net": 0, "edit_match": 0, "file_missing": 0, "other": 0}
+    error_cats = {"api_net": 0, "edit_match": 0, "file_missing": 0, "state_arg": 0}
     thinking_calls = 0
     thinking_chars = 0
     user_prompts = 0
     user_chars = 0
+    first_prompt = ""
     error_events = 0
     checkpoints = 0
     max_ctx = 0
@@ -411,6 +459,10 @@ def _parse_transcript_for_heatmap(path: str):
                     if txt:
                         user_prompts += 1
                         user_chars += len(txt)
+                        if not first_prompt:
+                            snip = _clean_user_prompt_snippet(txt)
+                            if snip:
+                                first_prompt = snip
 
                 tcs = d.get("tool_calls") or []
                 th = d.get("thinking")
@@ -551,13 +603,14 @@ def _parse_transcript_for_heatmap(path: str):
 
     day_keys = sorted(daily.keys())
     return {
-        "v6": 4,
+        "v6": 5,
         "mtime": st.st_mtime,
         "size": st.st_size,
         "daily": daily,
         "daily_ops": daily_ops,
         "first_day": day_keys[0] if day_keys else "",
         "last_day": day_keys[-1] if day_keys else "",
+        "first_prompt": first_prompt,
         "hourly": hourly,
         "hourly_fresh": hourly_fresh,
         "punchcard": punchcard,
@@ -702,7 +755,7 @@ def _build_achievements(summary, peak_day, tools_summary, hourly_calls, extra):
         ("tp_peak_week", "throughput", "算力实战", "hex", "单周爆发王", "单自然周最高净消耗纪录 (M)", extra["maxWeekFreshM"], [20, 50, 100, 180, 300, 480, 720, 1050, 1500, 2200], "M"),
         ("tp_focus_days", "throughput", "算力实战", "hex", "五百轮战日", "单日深度交互 ≥ 500 轮天数", extra["daysOver500Calls"], [3, 8, 18, 35, 65, 110, 180, 280, 420, 600], "天"),
         ("tp_hyper_days", "throughput", "算力实战", "hex", "千轮烈焰日", "单日高燃交互 ≥ 1,000 轮天数", extra["daysOver1000Calls"], [5, 12, 25, 45, 80, 130, 200, 300, 450, 650], "天"),
-        ("tp_debug_kills", "throughput", "算力实战", "hex", "除错猎手", "实战排查并攻克报错异常回合", extra["errorRecoveries"], [60, 200, 500, 1200, 2600, 5500, 11000, 20000, 35000, 60000], "次"),
+        ("tp_cache_saved", "throughput", "算力实战", "hex", "缓存架构师", "Prompt 前缀缓存累计免重算 (B)", round(summary["totalCache"] / 1_000_000_000, 2), [0.3, 1.0, 2.5, 5.5, 12, 24, 48, 90, 160, 280], "B"),
         ("tp_big_input", "throughput", "算力实战", "hex", "万卷视野", "单次吞入超长新上下文峰值 (k)", extra["maxSingleInK"], [80, 160, 300, 500, 780, 1150, 1600, 2200, 3000, 4000], "k"),
 
         # 3. 毅力心流 (laurel) — 9 项永久单调递增的作息与心流耐力维度
@@ -971,7 +1024,7 @@ def collect_heatmap_data(data_dir=None):
     conv_rows = []
     conv_detail_raw = {}
     conv_peak_ctxs = []
-    error_cats_agg = {"api_net": 0, "edit_match": 0, "file_missing": 0, "other": 0}
+    error_cats_agg = {"api_net": 0, "edit_match": 0, "file_missing": 0, "state_arg": 0}
     parent_children_agg = {}
 
     total_thinking_calls = 0
@@ -994,7 +1047,7 @@ def collect_heatmap_data(data_dir=None):
 
     for cid, fp, st in uniq_stat:
         cached = disk_cache.get(fp)
-        if cached and cached.get("mtime") == st.st_mtime and cached.get("size") == st.st_size and cached.get("v6") == 4:
+        if cached and cached.get("mtime") == st.st_mtime and cached.get("size") == st.st_size and cached.get("v6") == 5:
             parsed = cached
         else:
             parsed = _parse_transcript_for_heatmap(fp)
@@ -1015,8 +1068,16 @@ def collect_heatmap_data(data_dir=None):
         else:
             main_conv_count += 1
 
-        conv_title = titles.get(cid) or (f"子代理 {cid[:6]}" if is_child else f"对话 {cid[:8]}")
+        raw_db_title = (titles.get(cid) or "").strip()
+        is_generic_title = (not raw_db_title) or raw_db_title.lower() in ("新的对话", "new conversation", "untitled")
+        fp_snip = (parsed.get("first_prompt") or "").strip()
         ws_name = conv_workspaces.get(cid) or ""
+        if is_generic_title and fp_snip:
+            conv_title = fp_snip
+        elif raw_db_title:
+            conv_title = raw_db_title
+        else:
+            conv_title = f"子代理 {cid[:6]}" if is_child else f"对话 {cid[:8]}"
 
         total_thinking_calls += int(parsed.get("thinking_calls") or 0)
         total_thinking_chars += int(parsed.get("thinking_chars") or 0)
@@ -1145,17 +1206,26 @@ def collect_heatmap_data(data_dir=None):
 
         if not is_child and conv_fresh > 0:
             top_cm = max(conv_model_fresh.items(), key=lambda kv: kv[1])[0] if conv_model_fresh else "orchestrator-neon"
-            # Infer meaningful project folder when workspace metadata is missing ("默认工作区")
-            eff_ws = ws_name
-            if not eff_ws:
-                p_cnts = {}
-                for _fk, _frw in (parsed.get("file_rw") or {}).items():
-                    _pdir = _frw[4] if len(_frw) > 4 else ""
-                    if _pdir:
-                        p_cnts[_pdir] = p_cnts.get(_pdir, 0) + int(_frw[0]) + int(_frw[1])
-                if p_cnts:
-                    eff_ws = max(p_cnts.items(), key=lambda kv: kv[1])[0]
-            ws_key = eff_ws or "临时会话"
+            # Smart project attribution: avoid dumping unrelated tasks into a broad default IDE folder
+            p_cnts = {}
+            for _fk, _frw in (parsed.get("file_rw") or {}).items():
+                _pdir = _frw[4] if len(_frw) > 4 else ""
+                if _pdir and _pdir.lower() not in GENERIC_DIRS and _pdir.lower() not in CONTAINER_SKIP_DIRS:
+                    p_cnts[_pdir] = p_cnts.get(_pdir, 0) + int(_frw[0]) + int(_frw[1])
+            dom_proj, dom_ops = max(p_cnts.items(), key=lambda kv: kv[1]) if p_cnts else ("", 0)
+            ws_touched_ops = p_cnts.get(ws_name, 0) if ws_name else 0
+            if ws_name and ws_name.lower() not in CONTAINER_SKIP_DIRS and ws_name.lower() not in GENERIC_DIRS:
+                if dom_proj and dom_proj != ws_name and ws_touched_ops == 0 and dom_ops >= 3:
+                    eff_ws = dom_proj
+                elif ws_name == "防守底层逻辑" and ws_touched_ops == 0:
+                    eff_ws = "通用探索与日常任务"
+                else:
+                    eff_ws = ws_name
+            elif dom_proj:
+                eff_ws = dom_proj
+            else:
+                eff_ws = "通用探索与临时会话"
+            ws_key = eff_ws
             c_calls = int(parsed.get("conv_calls") or 0)
             c_ckpts = int(parsed.get("checkpoints") or 0)
             c_errs = int(parsed.get("error_events") or 0)
@@ -1390,6 +1460,13 @@ def collect_heatmap_data(data_dir=None):
         "a4Pages": a4_pages,
         "paperHeightMeters": paper_height_m,
         "devYears": dev_years,
+        "uniqueFilesCount": len(unique_files_agg),
+        "editOps": (
+            tools_agg.get("edit_file", 0)
+            + tools_agg.get("replace_file_content", 0)
+            + tools_agg.get("multi_replace_file_content", 0)
+        ),
+        "newFileWrites": tools_agg.get("write_file", 0) + tools_agg.get("write_to_file", 0),
     }
 
     days_over_10m = sum(1 for r in days_out.values() if r["fresh"] >= 10_000_000)
@@ -1580,7 +1657,7 @@ def collect_heatmap_data(data_dir=None):
             "savedPct": round((sav_u / max(0.01, wo_u)) * 100, 1) if wo_u > 0 else 0.0,
             "rates": {"in": r_in, "cache": r_ca, "out": r_out},
         })
-    finops_by_model.sort(key=lambda x: -x["withoutCacheUsd"])
+    finops_by_model.sort(key=lambda x: (-x["actualUsd"], -x["withoutCacheUsd"]))
     tot_act_safe = max(0.1, tot_act)
     for fm in finops_by_model:
         fm["sharePct"] = round((fm["actualUsd"] / tot_act_safe) * 100, 1)
@@ -1633,8 +1710,8 @@ def collect_heatmap_data(data_dir=None):
     err_meta = [
         ("api_net", "上游 API / 流中断"),
         ("edit_match", "代码定位未命中"),
+        ("state_arg", "状态与参数校验"),
         ("file_missing", "路径缺失 / 未找到"),
-        ("other", "其他工具异常"),
     ]
     err_sum = max(1, sum(error_cats_agg.values()))
     top_ctx_list = [
@@ -1811,6 +1888,11 @@ def collect_heatmap_data(data_dir=None):
     top2_share = round(sum(m["sharePct"] for m in models_list[:2]), 1)
     top_m_name = models_list[0]["displayName"] if models_list else "AI"
 
+    local_tool_errs = max(0, sum(error_cats_agg.values()) - error_cats_agg.get("api_net", 0))
+    edit_match_errs = error_cats_agg.get("edit_match", 0)
+    edit_hit_rate = round((max(0, edit_ops - edit_match_errs) / max(1, edit_ops)) * 100, 1) if edit_ops > 0 else 100.0
+    tool_clean_rate = round((max(0, total_tool_calls - local_tool_errs) / max(1, total_tool_calls)) * 100, 1) if total_tool_calls > 0 else 100.0
+
     insights_out = [
         {
             "id": "momentum",
@@ -1826,23 +1908,23 @@ def collect_heatmap_data(data_dir=None):
             "tone": "sky",
             "title": "大窗吞吐与自动压缩负荷",
             "metric": f"{total_checkpoints} 次压缩",
-            "body": f"单场上下文峰值达 {round(context_health_out['maxCtx'] / 1000):,}K Tokens（均值 {round(context_health_out['avgPeakCtx'] / 1000):,}K），共有 {context_health_out['heavyConvsCount']} 场迈入 500K+ 重型工程。",
+            "body": f"单场上下文峰值达 {round(context_health_out['maxCtx'] / 1000):,}K Tokens（P90 {round(context_health_out['p90PeakCtx'] / 1000):,}K），共有 {context_health_out['heavyConvsCount']} 场迈入 500K+ 重型工程。",
         },
         {
             "id": "autonomy",
             "tag": "代理效能",
             "tone": "purple",
-            "title": "工具自动化与排错自愈",
-            "metric": f"{round(total_tool_calls / max(1, total_user_prompts), 1)} 工具/问",
-            "body": f"{top_tool_row['label']} 占比 {top_tool_row['pct']}% 位居第一；累计自愈 {total_error_events:,} 次异常，首要诱因为「{top_err_row['label']}」（{top_err_row['count']} 次）。",
+            "title": "工具自动化与精准命中",
+            "metric": f"命中 {edit_hit_rate}%",
+            "body": f"{top_tool_row['label']} 占比 {top_tool_row['pct']}% 位居第一；局部代码编辑一次命中率 {edit_hit_rate}%，本地工具无报错通过率 {tool_clean_rate}%。",
         },
         {
             "id": "finops",
-            "tag": "FinOps 账单",
+            "tag": "API 参照",
             "tone": "gold",
-            "title": "分模型阶梯缓存省费报告",
+            "title": "同级 API 缓存减负测算",
             "metric": f"省 ${finops_out['totalSavedUsd']:,.0f}",
-            "body": f"按模型公开 API 定价加权折算，Prompt 缓存命中省下 {finops_out['savedPct']}%（日均实际 ${finops_out['avgDailyUsd']}）；{top_m_name} 等前两款主力占 {top2_share}% 算力。",
+            "body": f"按公开 API 单价加权折算，Prompt 缓存命中省下 {finops_out['savedPct']}%（日均等效 ${finops_out['avgDailyUsd']}）；{top_m_name} 等前两款主力占 {top2_share}% 算力。",
         },
     ]
 
@@ -1867,6 +1949,9 @@ def collect_heatmap_data(data_dir=None):
         "charRatio": round(out_chars_est / max(1, total_user_chars), 1) if total_user_chars > 0 else 0.0,
         "toolsPerPrompt": round(total_tool_calls / max(1, total_user_prompts), 1) if total_user_prompts > 0 else 0.0,
         "errorRecoveries": total_error_events,
+        "localToolErrors": local_tool_errs,
+        "editHitRate": edit_hit_rate,
+        "toolCleanRate": tool_clean_rate,
         "longestFlowHours": round(longest_flow_sec / 3600, 1),
         "totalFlowHours": round(total_flow_sec / 3600, 1),
     }

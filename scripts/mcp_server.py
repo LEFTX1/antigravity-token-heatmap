@@ -47,13 +47,16 @@ mcp = FastMCP("token-heatmap")
 
 def _fmt_summary(data: dict) -> str:
     s = data.get("summary") or {}
+    t = data.get("tools") or {}
+    lev = data.get("leverage") or {}
     peak = data.get("peakDay") or {}
     chrono = data.get("chronotype") or {}
     peak_txt = f"{peak.get('date')} ({peak.get('fresh', 0):,} 新消耗)" if peak else "暂无"
     return (
         f"Token 战绩墙：累计活跃 {s.get('activeDays', 0)} 天（当前连击 {s.get('currentStreak', 0)} 天 / 最长 {s.get('longestStreak', 0)} 天），"
-        f"共 {s.get('totalCalls', 0):,} 次调用；累计输出 {s.get('totalOutput', 0):,} Tokens（约 {s.get('threeBodyBooks', 0)} 部《三体》字数），"
-        f"总吞吐 {s.get('totalProcessed', 0):,} Tokens。最肝一天：{peak_txt}；作息类型：{chrono.get('title', '')}。"
+        f"共 {s.get('totalCalls', 0):,} 次交互；生成输出 {s.get('totalOutput', 0):,} Tokens，"
+        f"总吞吐 {s.get('totalProcessed', 0):,} Tokens（缓存命中 {s.get('cacheHitRate', 0)}% · 源码写入 {t.get('writes', 0):,} 次 · 编辑命中 {lev.get('editHitRate', 100)}%）。"
+        f"最肝一天：{peak_txt}；作息类型：{chrono.get('title', '')}。"
     )
 
 

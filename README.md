@@ -77,15 +77,15 @@ Built by synthesizing telemetry best practices from `ccusage`, `tokscale`, `Code
 | Module · 模块 | Highlights · 核心亮点 |
 | :--- | :--- |
 | **Sticky Glassmorphic Cockpit Nav** | Section jump pills, passive scroll-spy highlight, `Ctrl+K` / `⌘K` Command Palette, and 1-click Markdown report export (`导出战报`). |
-| **8 KPI Tiles + 7D Rolling Momentum** | Live `↗/↘` 7-day delta pills, micro wave charts, and cycling equivalents (`《三体》` books, engineering LOC, manual dev-years, A4 height). |
-| **Today Activity Rings & 6-Axis Radar** | Tri-ring daily goals (Fresh Tokens / Turns / Streak), Human-AI leverage ratio, flow endurance, self-healing error count, FinOps savings bill, and hoverable 6-axis radar with live exact math formulas. |
+| **8 KPI Tiles + 7D Rolling Momentum** | Live `↗/↘` 7-day delta pills, micro wave charts, and grounded engineering breakdowns (output per turn, Read/Write ratio, code writes, edit hit rate, unique files touched). |
+| **Today Activity Rings & 6-Axis Radar** | Tri-ring daily goals (Fresh Tokens / Turns / Streak), Human-AI leverage ratio, flow endurance, code edit first-pass hit rate, API-equivalent cache savings benchmark, and hoverable 6-axis radar with live exact math formulas. |
 | **Energy Contribution Heatmap** | Interactive square grid (`Auto` / `3M` / `6M` / `1Y`), metric switcher (`净耗` / `输出` / `轮次`), live gamma color-scale slider (`γ`) persisted across sessions, and clickable per-day drill-down strip. |
-| **Context Health & Heavy Sessions** | Tracks max context window, P90 & average peaks, auto-compaction (`CHECKPOINT`) count, 4 context buckets (`<64K` to `500K+`), Top-4 max-context clickable sessions, and honest error attribution separating upstream API stream disconnects from tool retries. |
-| **Tiered FinOps & 7D Momentum** | Model-tiered public API pricing estimation showing exact `$saved` by Prompt Cache hits alongside a 7-day vs previous-7-day velocity comparison table. |
-| **Engineering Actions, MCP & Projects** | Semantic action distribution (Terminal / Code Editing / Code Reading / Web & Browser / Multi-Agent / MCP — with zero internal RPC noise), MCP plugin stats, normalized CLI runtimes, **path-deduplicated Hot Project Files (`project/file`)** with Read/Write dual bars, and Project Allocation rankings. |
-| **54×10-Tier Collector Medal Hall** | 54 bespoke vector medals across 6 categories (`创作工程` / `算力实战` / `毅力心流` / `工具掌控` / `智能协同` / `巅峰传奇`), filterable by category or `待解锁` status, with full 10-tier progression ladder modals. |
-| **Single-Session Inspector (`Ctrl+K`)** | Search any past conversation by title, workspace, date, or archetype; click any session anywhere to inspect token composition (`Input`/`Cache`/`Output`), per-model collaboration, and tool footprint. |
-| **Chronotype, Weekly Rhythm & Fleet** | 24-hour chronotype analysis (`凌晨战神` / `夜航架构师` / etc.), Mon–Sun weekday vs weekend rhythm bars, Top-10 model fleet with cache hit rings, and weekly stacked evolution / 14-day smooth trend curves. |
+| **Context Health & Heavy Sessions** | Tracks max context window, P90 & average peaks, auto-compaction (`CHECKPOINT`) count, 4 context buckets (`<64K` to `500K+`), prompt-recovered Top-4 heavy sessions, edit first-pass hit rate, and honest error attribution. |
+| **API Benchmark & 7D Momentum** | Tiered public API equivalent benchmark (`$saved` by Prompt Cache hits without negative double-counting, strictly sorted) alongside a 7-day vs previous-7-day velocity comparison table. |
+| **Engineering Actions, MCP & Projects** | Semantic action distribution (with zero internal RPC plumbing), MCP plugin stats, normalized CLI runtimes (`python` / `powershell` / `node` / `baw`), **path-deduplicated Hot Project Files (`project/file`)**, and smart Project Allocation rankings. |
+| **54×10-Tier Collector Medal Hall** | 54 bespoke vector medals across 6 categories with visible acquisition criteria, filterable by category or `未解锁` status, and full 10-tier progression ladder modals. |
+| **Single-Session Inspector (`Ctrl+K`)** | Search any past conversation by title, workspace, or date; click any session anywhere to inspect token composition (`Input`/`Cache`/`Output`), per-model collaboration, and tool footprint. |
+| **Chronotype, Weekly Rhythm & Fleet** | 24-hour chronotype analysis (`凌晨战神` / `夜航架构师` / etc.), Mon–Sun weekday vs weekend rhythm bars, Top-10 model fleet with readable names + cache hit rings, and weekly stacked evolution / 14-day smooth trend curves. |
 | **6-Slide Stories & 3-Theme Posters** | Interactive Spotify-Wrapped-style recap (`←/→` keys) + 1080×1920 Portrait & 1920×1080 Landscape PNG studio in **Obsidian Aurora**, **Ivory Gallery**, and **Obsidian Gold**, supporting `Ctrl+C` native system clipboard copy. |
 
 ---
