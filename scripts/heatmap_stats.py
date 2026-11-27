@@ -1573,26 +1573,43 @@ def collect_heatmap_data(data_dir=None):
         ("gte500k", "500K+", sum(1 for v in ctx_sorted if v >= 500_000)),
     ]
     err_meta = [
-        ("api_net", "API / 流中断"),
+        ("api_net", "上游 API / 流中断"),
         ("edit_match", "代码定位未命中"),
         ("file_missing", "路径缺失 / 未找到"),
-        ("other", "其他执行异常"),
+        ("other", "其他工具异常"),
     ]
     err_sum = max(1, sum(error_cats_agg.values()))
+    top_ctx_list = [
+        {
+            "id": r["id"],
+            "title": r["title"],
+            "workspace": r["workspace"],
+            "maxCtx": r["maxCtx"],
+            "checkpoints": r["checkpoints"],
+            "fresh": r["fresh"],
+            "calls": r["calls"],
+            "topModel": r["topModel"],
+        }
+        for r in sorted(conv_rows, key=lambda x: (-x.get("maxCtx", 0), -x["fresh"]))[:5]
+        if r.get("maxCtx", 0) > 0
+    ]
     context_health_out = {
         "maxCtx": ctx_sorted[-1] if ctx_sorted else 0,
         "avgPeakCtx": round(sum(ctx_sorted) / ctx_n) if ctx_sorted else 0,
         "p90PeakCtx": ctx_sorted[min(len(ctx_sorted) - 1, int(len(ctx_sorted) * 0.9))] if ctx_sorted else 0,
         "totalCheckpoints": total_checkpoints,
         "heavyConvsCount": b_counts[3][2],
+        "totalNodes": len(ctx_sorted),
         "buckets": [
             {"key": k, "label": lbl, "count": cnt, "pct": round((cnt / ctx_n) * 100, 1)}
             for k, lbl, cnt in b_counts
         ],
+        "errorTotal": sum(error_cats_agg.values()),
         "errorCats": [
             {"key": k, "label": lbl, "count": error_cats_agg.get(k, 0), "pct": round((error_cats_agg.get(k, 0) / err_sum) * 100, 1)}
             for k, lbl in err_meta
         ],
+        "topConvs": top_ctx_list,
     }
 
     # 7-Day Rolling Momentum vs Previous 7 Calendar Days
