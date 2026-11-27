@@ -1,0 +1,18 @@
+{
+  "name": "token-heatmap",
+  "displayName": "Token 热力图与战绩墙",
+  "description": "Local-first AI engineering telemetry cockpit for Google Antigravity: interactive GitHub-style token heatmap, 54-tier achievement gallery, model-tiered FinOps savings, context health audit, toolchain/hot-files arsenal, Command-K session inspector, Stories recap & collectible posters. 将 Antigravity 历史对话日志转化为交互式 Token 贡献热力图、AI 研发洞察与分模型 FinOps 账单面板。",
+  "version": "3.0.0",
+  "logo": "assets/logo.svg",
+  "author": {
+    "name": "LEFTX1",
+    "url": "https://github.com/LEFTX1"
+  },
+  "homepage": "https://github.com/LEFTX1/antigravity-token-heatmap",
+  "repository": "https://github.com/LEFTX1/antigravity-token-heatmap",
+  "suggestedPrompts": [
+    "打开我的 Token 热力图与 AI 工程战绩墙",
+    "查看我的分模型 FinOps 缓存省钱账单、7日算力动量与热点源码",
+    "生成一张暗夜或黑金风格的 Antigravity AI 编程能量年鉴海报"
+  ]
+}

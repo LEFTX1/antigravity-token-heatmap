@@ -1,0 +1,14 @@
+{
+  "name": "antigravity-token-heatmap",
+  "version": "3.0.0",
+  "description": "Local-first AI engineering telemetry cockpit: GitHub-style token heatmap, FinOps savings, context health audit, 54-tier achievement badges & collectible posters for Antigravity and Gemini CLI.",
+  "contextFileName": "skills/token-heatmap/SKILL.md",
+  "mcpServers": {
+    "heatmap": {
+      "command": "python",
+      "args": [
+        "${extensionPath}/scripts/mcp_server.py"
+      ]
+    }
+  }
+}
